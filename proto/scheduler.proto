@@ -14,8 +14,9 @@ service TaskService {
 message EmptyRequest {}
 
 message TaskRequest {
-  string cron_expression = 1;
-  string command = 2;
+  int64 id = 1;
+  string cron_expression = 2;
+  string command = 3;
 }
 
 message UpdateTaskRequest {

@@ -63,6 +63,7 @@ type TaskRequest struct {
 
 	CronExpression string `protobuf:"bytes,1,opt,name=cron_expression,json=cronExpression,proto3" json:"cron_expression,omitempty"`
 	Command        string `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
+	TaskId         int64
 }
 
 func (x *TaskRequest) Reset() {
