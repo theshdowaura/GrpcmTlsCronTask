@@ -18,7 +18,7 @@ import (
 func main() {
 	// 配置
 	dbType := "sqlite" // 或 "mongodb"
-	sqliteDBPath := "../../tasks.db"
+	sqliteDBPath := "tasks.db"
 	mongoURI := "mongodb://localhost:27017"
 
 	var dbInstance interface{}
