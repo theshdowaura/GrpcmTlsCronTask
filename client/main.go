@@ -38,7 +38,7 @@ func main() {
 	}
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&caCert, "ca", "certs/server.crt", "CA 证书路径")
+	rootCmd.PersistentFlags().StringVar(&caCert, "ca", "certs/ca.crt", "CA 证书路径")
 	rootCmd.PersistentFlags().StringVar(&clientCert, "cert", "certs/client.crt", "客户端证书路径")
 	rootCmd.PersistentFlags().StringVar(&clientKey, "key", "certs/client.key", "客户端密钥路径")
 	rootCmd.PersistentFlags().StringVar(&serverAddr, "server", "localhost:50051", "服务器地址")
