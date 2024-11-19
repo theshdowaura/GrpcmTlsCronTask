@@ -11,8 +11,9 @@ import (
 )
 
 type MongoDB struct {
-	Client     *mongo.Client
-	Collection *mongo.Collection
+	Client       *mongo.Client
+	Collection   *mongo.Collection
+	DatabaseName string
 }
 
 func NewMongoDB(uri string) (*MongoDB, error) {

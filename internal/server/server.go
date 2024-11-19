@@ -5,7 +5,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"go.mongodb.org/mongo-driver/mongo"
 	"log"
 	"os/exec"
 	"sync"
@@ -17,8 +16,20 @@ import (
 
 	"github.com/robfig/cron/v3"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
+
+// TaskExecutionLog 表示任务执行的日志记录
+type TaskExecutionLog struct {
+	TaskID    int64  `bson:"task_id" json:"task_id"`
+	Command   string `bson:"command" json:"command"`
+	Output    string `bson:"output" json:"output"`
+	StartTime string `bson:"start_time" json:"start_time"`
+	EndTime   string `bson:"end_time" json:"end_time"`
+	Status    string `bson:"status" json:"status"`
+	Error     string `bson:"error,omitempty" json:"error,omitempty"`
+}
 
 // Server 实现 TaskServiceServer 接口
 type Server struct {
@@ -67,8 +78,8 @@ func (s *Server) RegisterTasks() error {
 	defer s.mu.Unlock()
 
 	for _, task := range tasks {
-		// 添加任务到调度器
-		entryID, err := s.Scheduler.AddTask(task.CronExpression, task.Id, task.Command)
+		// 添加任务到调度器，传递 executeTask 作为回调函数
+		entryID, err := s.Scheduler.AddTask(task.CronExpression, task.Id, task.Command, s.executeTask)
 		if err != nil {
 			log.Printf("Failed to add task ID %d to scheduler: %v", task.Id, err)
 			continue
@@ -114,13 +125,12 @@ func (s *Server) syncTasks() error {
 	for id, task := range taskMap {
 		entryID, exists := s.Tasks[id]
 		if exists {
-			// 获取当前调度器中的任务信息
-			// 由于 cron.Entry 不直接存储任务的 Cron 表达式和命令，
-			// 这里简化处理，假设数据库中的任务信息是最新的，直接重新调度
+			// 移除旧的任务
 			s.Scheduler.Cron.Remove(entryID)
 			delete(s.Tasks, id)
 
-			newEntryID, err := s.Scheduler.AddTask(task.CronExpression, task.Id, task.Command)
+			// 重新添加更新后的任务
+			newEntryID, err := s.Scheduler.AddTask(task.CronExpression, task.Id, task.Command, s.executeTask)
 			if err != nil {
 				log.Printf("Failed to update task ID %d in scheduler: %v", id, err)
 				continue
@@ -129,7 +139,7 @@ func (s *Server) syncTasks() error {
 			log.Printf("Updated scheduled task ID %d: %s -> %s", id, task.CronExpression, task.Command)
 		} else {
 			// 新任务，添加到调度器
-			newEntryID, err := s.Scheduler.AddTask(task.CronExpression, task.Id, task.Command)
+			newEntryID, err := s.Scheduler.AddTask(task.CronExpression, task.Id, task.Command, s.executeTask)
 			if err != nil {
 				log.Printf("Failed to add new task ID %d to scheduler: %v", id, err)
 				continue
@@ -156,7 +166,7 @@ func (s *Server) syncTasks() error {
 func (s *Server) fetchAllTasksFromDB() ([]*pb.TaskDetail, error) {
 	if s.DBType == "sqlite" {
 		sqliteDB := s.DB.(*db.SQLiteDB)
-		rows, err := sqliteDB.DB.Query("SELECT id, cron_expression, command, next_run, status, created_at, updated_at FROM tasks")
+		rows, err := sqliteDB.DB.Query("SELECT id, cron_expression, command, output, status, created_at, updated_at FROM tasks")
 		if err != nil {
 			return nil, fmt.Errorf("failed to query tasks: %v", err)
 		}
@@ -165,7 +175,7 @@ func (s *Server) fetchAllTasksFromDB() ([]*pb.TaskDetail, error) {
 		var tasks []*pb.TaskDetail
 		for rows.Next() {
 			var task pb.TaskDetail
-			err := rows.Scan(&task.Id, &task.CronExpression, &task.Command, &task.NextRun, &task.Status, &task.CreatedAt, &task.UpdatedAt)
+			err := rows.Scan(&task.Id, &task.CronExpression, &task.Command, &task.Output, &task.Status, &task.CreatedAt, &task.UpdatedAt)
 			if err != nil {
 				return nil, fmt.Errorf("failed to scan task: %v", err)
 			}
@@ -205,8 +215,8 @@ func (s *Server) AddTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResp
 		}, err
 	}
 
-	// 添加任务到调度器
-	entryID, err := s.Scheduler.AddTask(req.CronExpression, taskID, req.Command)
+	// 添加任务到调度器，传递 executeTask 作为回调函数
+	entryID, err := s.Scheduler.AddTask(req.CronExpression, taskID, req.Command, s.executeTask)
 	if err != nil {
 		return &pb.TaskResponse{
 			Status:       "Failed",
@@ -293,8 +303,8 @@ func (s *Server) UpdateTask(ctx context.Context, req *pb.UpdateTaskRequest) (*pb
 		}, fmt.Errorf("task ID %d not found", taskID)
 	}
 
-	// 添加更新后的任务到调度器
-	newEntryID, err := s.Scheduler.AddTask(req.CronExpression, taskID, req.Command)
+	// 添加更新后的任务到调度器，传递 executeTask 作为回调函数
+	newEntryID, err := s.Scheduler.AddTask(req.CronExpression, taskID, req.Command, s.executeTask)
 	if err != nil {
 		return &pb.TaskResponse{
 			Status:       "Failed",
@@ -337,23 +347,6 @@ func (s *Server) ListTasks(ctx context.Context, req *pb.EmptyRequest) (*pb.Tasks
 	}, nil
 }
 
-// RunCommand 被调度器调用，执行命令并更新状态
-func (s *Server) RunCommand(taskID int64, command string) {
-	// 执行命令
-	cmd := exec.Command("sh", "-c", command)
-	err := cmd.Run()
-	status := "Success"
-	if err != nil {
-		status = fmt.Sprintf("Failed: %v", err)
-	}
-
-	// 更新任务状态和下次运行时间
-	err = s.updateTaskRunStatus(taskID, status)
-	if err != nil {
-		log.Printf("Failed to update task status for Task ID %d: %v", taskID, err)
-	}
-}
-
 // generateTaskID 生成新的任务ID
 func (s *Server) generateTaskID() (int64, error) {
 	if s.DBType == "sqlite" {
@@ -381,23 +374,32 @@ func (s *Server) generateTaskID() (int64, error) {
 
 // saveTaskToDB 保存任务到数据库
 func (s *Server) saveTaskToDB(id int64, cronExpr, command, status string) error {
+	// 创建 UTC+8 时区
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return fmt.Errorf("failed to load location: %v", err)
+	}
+
 	if s.DBType == "sqlite" {
 		sqliteDB := s.DB.(*db.SQLiteDB)
 		_, err := sqliteDB.DB.Exec(
-			"INSERT INTO tasks (id, cron_expression, command, next_run, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+			"INSERT INTO tasks (id, cron_expression, command, output, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
 			id, cronExpr, command, "", status,
+			time.Now().In(location).Format(time.RFC3339),
+			time.Now().In(location).Format(time.RFC3339),
 		)
 		return err
 	} else if s.DBType == "mongodb" {
 		mongoDB := s.DB.(*db.MongoDB)
+		// 使用单独的集合来保存任务
 		_, err := mongoDB.Collection.InsertOne(context.Background(), bson.M{
 			"_id":             id,
 			"cron_expression": cronExpr,
 			"command":         command,
-			"next_run":        "",
+			"output":          "",
 			"status":          status,
-			"created_at":      time.Now().Format(time.RFC3339),
-			"updated_at":      time.Now().Format(time.RFC3339),
+			"created_at":      time.Now().In(location).Format(time.RFC3339),
+			"updated_at":      time.Now().In(location).Format(time.RFC3339),
 		})
 		return err
 	}
@@ -409,8 +411,8 @@ func (s *Server) updateTaskInDB(id int64, cronExpr, command string) error {
 	if s.DBType == "sqlite" {
 		sqliteDB := s.DB.(*db.SQLiteDB)
 		_, err := sqliteDB.DB.Exec(
-			"UPDATE tasks SET cron_expression = ?, command = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			cronExpr, command, id,
+			"UPDATE tasks SET cron_expression = ?, command = ?, updated_at = ? WHERE id = ?",
+			cronExpr, command, time.Now().Format(time.RFC3339), id,
 		)
 		return err
 	} else if s.DBType == "mongodb" {
@@ -446,8 +448,8 @@ func (s *Server) updateTaskRunStatus(id int64, status string) error {
 	if s.DBType == "sqlite" {
 		sqliteDB := s.DB.(*db.SQLiteDB)
 		_, err := sqliteDB.DB.Exec(
-			"UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-			status, id,
+			"UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+			status, time.Now().Format(time.RFC3339), id,
 		)
 		return err
 	} else if s.DBType == "mongodb" {
@@ -461,4 +463,64 @@ func (s *Server) updateTaskRunStatus(id int64, status string) error {
 		return err
 	}
 	return fmt.Errorf("unsupported db type: %s", s.DBType)
+}
+
+// saveTaskExecutionLog 保存任务执行日志到数据库
+func (s *Server) saveTaskExecutionLog(logEntry TaskExecutionLog) error {
+	if s.DBType == "sqlite" {
+		sqliteDB := s.DB.(*db.SQLiteDB)
+		_, err := sqliteDB.DB.Exec(
+			"INSERT INTO task_execution_logs (task_id, command, output, start_time, end_time, status, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			logEntry.TaskID, logEntry.Command, logEntry.Output, logEntry.StartTime, logEntry.EndTime, logEntry.Status, logEntry.Error,
+		)
+		if err != nil {
+			log.Printf("SQLite Insert Error: %v", err)
+		}
+		return err
+	} else if s.DBType == "mongodb" {
+		mongoDB := s.DB.(*db.MongoDB)
+		// 使用单独的集合来保存日志
+		logsCollection := mongoDB.Client.Database(mongoDB.DatabaseName).Collection("task_execution_logs")
+		_, err := logsCollection.InsertOne(context.Background(), logEntry)
+		if err != nil {
+			log.Printf("MongoDB Insert Error: %v", err)
+		}
+		return err
+	}
+	return fmt.Errorf("unsupported db type: %s", s.DBType)
+}
+
+// executeTask 执行任务命令并保存执行日志
+func (s *Server) executeTask(task pb.TaskDetail) {
+	startTime := time.Now().In(time.FixedZone("CST", 8*3600)).Format(time.RFC3339)
+
+	// 执行任务命令，并捕获输出
+	cmd := exec.Command("sh", "-c", task.Command)
+	outputBytes, err := cmd.CombinedOutput()
+	output := string(outputBytes)
+	endTime := time.Now().In(time.FixedZone("CST", 8*3600)).Format(time.RFC3339)
+
+	status := "Success"
+	errorMsg := ""
+	if err != nil {
+		status = "Failed"
+		errorMsg = err.Error()
+	}
+
+	// 创建日志条目
+	logEntry := TaskExecutionLog{
+		TaskID:    task.Id,
+		Command:   task.Command,
+		Output:    output,
+		StartTime: startTime,
+		EndTime:   endTime,
+		Status:    status,
+		Error:     errorMsg,
+	}
+
+	// 保存日志到数据库
+	err = s.saveTaskExecutionLog(logEntry)
+	if err != nil {
+		log.Printf("Failed to save task execution log for Task ID %d: %v", task.Id, err)
+	}
 }
