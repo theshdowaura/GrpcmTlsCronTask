@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package scheduler;
+
+
+service TaskService {
+  rpc AddTask (TaskRequest) returns (TaskResponse);
+  rpc UpdateTask (UpdateTaskRequest) returns (TaskResponse);
+  rpc DeleteTask (DeleteTaskRequest) returns (TaskResponse);
+  rpc ListTasks (EmptyRequest) returns (TasksResponse);
+}
+
+message EmptyRequest {}
+
+message TaskRequest {
+  int64 id = 1;
+  string cron_expression = 2;
+  string command = 3;
+}
+
+message UpdateTaskRequest {
+  int64 id = 1;
+  string cron_expression = 2;
+  string command = 3;
+}
+
+message DeleteTaskRequest {
+  int64 id = 1;
+}
+
+message TaskResponse {
+  string status = 1;
+  int64 task_id = 2;
+  string error_message = 3;
+}
+
+message TaskDetail {
+  int64 id = 1;
+  string cron_expression = 2;
+  string command = 3;
+  string output = 4;
+  string status = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message TasksResponse {
+  repeated TaskDetail tasks = 1;
+}
