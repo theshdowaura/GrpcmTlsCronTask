@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package scheduler;
 
-option go_package = "GrpcmTlsCronTask/proto;proto";
+option go_package = "GrpcmTlsCronTask/server/proto;proto";
 
 service TaskService {
   rpc AddTask (TaskRequest) returns (TaskResponse);
@@ -39,7 +39,7 @@ message TaskDetail {
   int64 id = 1;
   string cron_expression = 2;
   string command = 3;
-  string next_run = 4;
+  string output = 4;
   string status = 5;
   string created_at = 6;
   string updated_at = 7;

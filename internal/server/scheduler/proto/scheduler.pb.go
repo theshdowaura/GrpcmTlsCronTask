@@ -284,7 +284,7 @@ type TaskDetail struct {
 	Id             int64  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
 	CronExpression string `protobuf:"bytes,2,opt,name=cron_expression,json=cronExpression,proto3" json:"cron_expression,omitempty"`
 	Command        string `protobuf:"bytes,3,opt,name=command,proto3" json:"command,omitempty"`
-	NextRun        string `protobuf:"bytes,4,opt,name=next_run,json=nextRun,proto3" json:"next_run,omitempty"`
+	Output         string `protobuf:"bytes,4,opt,name=output,json=Output,proto3" json:"output,omitempty"`
 	Status         string `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
 	CreatedAt      string `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt      string `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
@@ -343,7 +343,7 @@ func (x *TaskDetail) GetCommand() string {
 
 func (x *TaskDetail) GetNextRun() string {
 	if x != nil {
-		return x.NextRun
+		return x.Output
 	}
 	return ""
 }

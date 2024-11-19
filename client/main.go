@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	pb "GrpcmTlsCronTask/client/scheduler/proto" // 根据实际情况调整导入路径
+	pb "GrpcmTlsCronTask/proto/scheduler/proto" // 根据实际情况调整导入路径
 )
 
 func main() {
@@ -304,10 +304,10 @@ func listCmd(caCert, clientCert, clientKey, serverAddr *string, timeout *int) *c
 
 			// Print the task list
 			fmt.Println("当前任务队列:")
-			fmt.Printf("%-5s %-20s %-25s %-25s %-15s %-20s %-20s\n", "ID", "Cron 表达式", "命令", "Next Run", "状态", "Created At", "Updated At")
+			fmt.Printf("%-5s %-20s %-25s %-25s %-15s %-20s %-20s\n", "ID", "Cron 表达式", "命令", "Output", "状态", "Created At", "Updated At")
 			for _, task := range response.Tasks {
 				fmt.Printf("%-5d %-20s %-25s %-25s %-15s %-20s %-20s\n",
-					task.Id, task.CronExpression, task.Command, task.NextRun, task.Status, task.CreatedAt, task.UpdatedAt)
+					task.Id, task.CronExpression, task.Command, task.Output, task.Status, task.CreatedAt, task.UpdatedAt)
 			}
 		},
 	}
